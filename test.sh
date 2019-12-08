@@ -1,0 +1,15 @@
+python3 bert_pytorch/test.py \
+	--dataset="/homes/gws/gezhang/jupyter-notebook-analysis/graphs/cell_with_func.txt" \
+	--model_path='same_dataset.model.ep6' \
+	--cuda_devices=1 \
+	--log_freq=1000 \
+	--epochs=200 \
+	--layers=2 \
+	--attn_heads=2 \
+	--lr=0.00001 \
+	--batch_size=32 \
+	--duplicate=1 \
+	--min_occur=3 \
+	--weak_supervise \
+	--seq_len=64 \
+	--use_sub_token
