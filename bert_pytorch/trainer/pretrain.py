@@ -1,12 +1,13 @@
 import torch
 import torch.nn as nn
-from torch.optim import Adam
+from torch.optim import Adam, SGD
 from torch.utils.data import DataLoader
 
-from ..model import BERTLM, BERT
+from model import BERTLM, BERT
 from .optim_schedule import ScheduledOptim
 
 import tqdm
+import pdb
 
 
 class BERTTrainer:
@@ -23,7 +24,7 @@ class BERTTrainer:
     def __init__(self, bert: BERT, vocab_size: int,
                  train_dataloader: DataLoader, test_dataloader: DataLoader = None,
                  lr: float = 1e-4, betas=(0.9, 0.999), weight_decay: float = 0.01, warmup_steps=10000,
-                 with_cuda: bool = True, cuda_devices=None, log_freq: int = 10):
+                 with_cuda: bool = True, cuda_devices=None, log_freq: int = 10, pad_index=0):
         """
         :param bert: BERT model which you want to train
         :param vocab_size: total word vocab size
@@ -53,23 +54,28 @@ class BERTTrainer:
         # Setting the train and test data loader
         self.train_data = train_dataloader
         self.test_data = test_dataloader
-
+        self.pad_index = pad_index
         # Setting the Adam optimizer with hyper-param
-        self.optim = Adam(self.model.parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
-        self.optim_schedule = ScheduledOptim(self.optim, self.bert.hidden, n_warmup_steps=warmup_steps)
-
+        # self.optim = Adam(self.model.parameters(), lr=lr,
+        #                   betas=betas, weight_decay=weight_decay)
+        # self.optim_schedule = ScheduledOptim(
+        #     self.optim, self.bert.hidden, n_warmup_steps=warmup_steps)
+        self.optim = SGD(self.model.parameters(), lr=lr, momentum=0.9)
         # Using Negative Log Likelihood Loss function for predicting the masked_token
-        self.criterion = nn.NLLLoss(ignore_index=0)
+        self.criterion = nn.NLLLoss(ignore_index=self.pad_index)
 
         self.log_freq = log_freq
 
-        print("Total Parameters:", sum([p.nelement() for p in self.model.parameters()]))
+        print("Total Parameters:", sum([p.nelement()
+                                        for p in self.model.parameters()]))
 
     def train(self, epoch):
-        self.iteration(epoch, self.train_data)
+        self.model.train()
+        return self.iteration(epoch, self.train_data)
 
     def test(self, epoch):
-        self.iteration(epoch, self.test_data, train=False)
+        self.model.eval()
+        return self.iteration(epoch, self.test_data, train=False)
 
     def iteration(self, epoch, data_loader, train=True):
         """
@@ -82,6 +88,7 @@ class BERTTrainer:
         :param train: boolean value of is train or test
         :return: None
         """
+        # pdb.set_trace()
         str_code = "train" if train else "test"
 
         # Setting the tqdm progress bar
@@ -94,33 +101,63 @@ class BERTTrainer:
         total_correct = 0
         total_element = 0
 
+        def calculate_iter(data):
+            next_sent_output, mask_lm_output = self.model.forward(
+                data["bert_input"], data["segment_label"], data["adj_mat"], train)
+            mask_loss = self.criterion(
+                mask_lm_output.transpose(1, 2), data["bert_label"])
+            loss = mask_loss
+            return loss
+
         for i, data in data_iter:
             # 0. batch_data will be sent into the device(GPU or cpu)
+            # pdb.set_trace()
+            data = data[0]
             data = {key: value.to(self.device) for key, value in data.items()}
 
+            if train:
+                loss = calculate_iter(data)
+            else:
+                with torch.no_grad():
+                    loss = calculate_iter(data)
             # 1. forward the next_sentence_prediction and masked_lm model
-            next_sent_output, mask_lm_output = self.model.forward(data["bert_input"], data["segment_label"])
+            # next_sent_output, mask_lm_output = self.model.forward(
+            #     data["bert_input"], data["segment_label"], data["adj_mat"], train)
+            # # pdb.set_trace()
+            # # 2-1. NLL(negative log likelihood) loss of is_next classification result
+            # # next_loss = self.criterion(next_sent_output, data["is_next"])
 
-            # 2-1. NLL(negative log likelihood) loss of is_next classification result
-            next_loss = self.criterion(next_sent_output, data["is_next"])
-
-            # 2-2. NLLLoss of predicting masked token word
-            mask_loss = self.criterion(mask_lm_output.transpose(1, 2), data["bert_label"])
-
-            # 2-3. Adding next_loss and mask_loss : 3.4 Pre-training Procedure
-            loss = next_loss + mask_loss
+            # # 2-2. NLLLoss of predicting masked token word
+            # mask_loss = self.criterion(
+            #     mask_lm_output.transpose(1, 2), data["bert_label"])
+            # # pdb.set_trace()
+            # # 2-3. Adding next_loss and mask_loss : 3.4 Pre-training Procedure
+            # # loss = next_loss + mask_loss
+            # loss = mask_loss
 
             # 3. backward and optimization only in train
             if train:
-                self.optim_schedule.zero_grad()
+                self.optim.zero_grad()
                 loss.backward()
-                self.optim_schedule.step_and_update_lr()
-
+                # self.optim.step_and_update_lr()
+                self.optim.step()
+            # pdb.set_trace()
+            # mlm prediction accuracy
+            # correct = next_sent_output.argmax(
+            #     dim=-1).eq(data["is_next"]).sum().item()
+            correct = 0
+            elements = 0
+            for labels, t_labels in zip(mask_lm_output.argmax(dim=-1), data["bert_label"]):
+                correct += sum([1 if l == t and t !=
+                                self.pad_index else 0 for l, t in zip(labels, t_labels)])
+                elements += sum([1 for t in t_labels if t != self.pad_index])
             # next sentence prediction accuracy
-            correct = next_sent_output.argmax(dim=-1).eq(data["is_next"]).sum().item()
+            # correct = next_sent_output.argmax(
+            #     dim=-1).eq(data["is_next"]).sum().item()
             avg_loss += loss.item()
             total_correct += correct
-            total_element += data["is_next"].nelement()
+            # total_element += data["is_next"].nelement()
+            total_element += elements
 
             post_fix = {
                 "epoch": epoch,
@@ -130,11 +167,12 @@ class BERTTrainer:
                 "loss": loss.item()
             }
 
-            if i % self.log_freq == 0:
+            if i % self.log_freq == 0 and i != 0:
                 data_iter.write(str(post_fix))
 
         print("EP%d_%s, avg_loss=" % (epoch, str_code), avg_loss / len(data_iter), "total_acc=",
               total_correct * 100.0 / total_element)
+        return avg_loss / len(data_iter)
 
     def save(self, epoch, file_path="output/bert_trained.model"):
         """
@@ -144,8 +182,24 @@ class BERTTrainer:
         :param file_path: model output path which gonna be file_path+"ep%d" % epoch
         :return: final_output_path
         """
-        output_path = file_path + ".ep%d" % epoch
-        torch.save(self.bert.cpu(), output_path)
-        self.bert.to(self.device)
+        # output_path = file_path + ".ep%d" % epoch
+        # torch.save(self.bert.cpu(), output_path)
+        # self.bert.to(self.device)
+        # print("EP:%d Model Saved on:" % epoch, output_path)
+        # return output_path
+
+        output_path = file_path  # + ".ep%d" % epoch
+        # if self.updated:
+        #     return output_path
+        # torch.save(self.bert.cpu(), output_path)
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict()
+            # 'optimizer_state_dict': optimizer.state_dict(),
+            # 'loss': loss,
+            # ...
+        }, output_path)
+        # self.bert.to(self.device)
         print("EP:%d Model Saved on:" % epoch, output_path)
+        # self.updated = True
         return output_path

@@ -1,5 +1,6 @@
 import torch.nn as nn
 from .gelu import GELU
+import pdb
 
 
 class PositionwiseFeedForward(nn.Module):
@@ -12,5 +13,9 @@ class PositionwiseFeedForward(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.activation = GELU()
 
-    def forward(self, x):
+    def forward(self, x, train=True):
+        # pdb.set_trace()
+        if not train:
+            pdb.set_trace()
+        # return self.w_2(self.activation(self.w_1(x)))
         return self.w_2(self.dropout(self.activation(self.w_1(x))))

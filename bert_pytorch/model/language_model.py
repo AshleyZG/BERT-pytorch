@@ -1,6 +1,7 @@
 import torch.nn as nn
 
 from .bert import BERT
+import pdb
 
 
 class BERTLM(nn.Module):
@@ -20,8 +21,9 @@ class BERTLM(nn.Module):
         self.next_sentence = NextSentencePrediction(self.bert.hidden)
         self.mask_lm = MaskedLanguageModel(self.bert.hidden, vocab_size)
 
-    def forward(self, x, segment_label):
-        x = self.bert(x, segment_label)
+    def forward(self, x, segment_label, adj_mat, train):
+        # pdb.set_trace()
+        x = self.bert(x, segment_label, adj_mat, train)
         return self.next_sentence(x), self.mask_lm(x)
 
 

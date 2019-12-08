@@ -1,5 +1,6 @@
 import torch.nn as nn
 from .layer_norm import LayerNorm
+import pdb
 
 
 class SublayerConnection(nn.Module):
@@ -14,5 +15,10 @@ class SublayerConnection(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, sublayer):
+        # pdb.set_trace()
+        # 有问题
         "Apply residual connection to any sublayer with the same size."
+        # result = x + self.dropout(sublayer(self.norm(x)))
+        # return x + sublayer(self.norm(x))
+
         return x + self.dropout(sublayer(self.norm(x)))

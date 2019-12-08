@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import torch
 
 import math
+import pdb
 
 
 class Attention(nn.Module):
@@ -10,9 +11,13 @@ class Attention(nn.Module):
     Compute 'Scaled Dot Product Attention
     """
 
-    def forward(self, query, key, value, mask=None, dropout=None):
+    def forward(self, query, key, value, mask=None, dropout=None, train=False
+                ):
+        # if not train:
+
+        #     pdb.set_trace()
         scores = torch.matmul(query, key.transpose(-2, -1)) \
-                 / math.sqrt(query.size(-1))
+            / math.sqrt(query.size(-1))
 
         if mask is not None:
             scores = scores.masked_fill(mask == 0, -1e9)

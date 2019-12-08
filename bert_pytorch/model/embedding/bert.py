@@ -2,6 +2,7 @@ import torch.nn as nn
 from .token import TokenEmbedding
 from .position import PositionalEmbedding
 from .segment import SegmentEmbedding
+import pdb
 
 
 class BERTEmbedding(nn.Module):
@@ -21,12 +22,28 @@ class BERTEmbedding(nn.Module):
         :param dropout: dropout rate
         """
         super().__init__()
-        self.token = TokenEmbedding(vocab_size=vocab_size, embed_size=embed_size)
+        self.token = TokenEmbedding(
+            vocab_size=vocab_size, embed_size=embed_size)
         self.position = PositionalEmbedding(d_model=self.token.embedding_dim)
         self.segment = SegmentEmbedding(embed_size=self.token.embedding_dim)
         self.dropout = nn.Dropout(p=dropout)
         self.embed_size = embed_size
+        self.layernorm = nn.LayerNorm(embed_size, eps=1e-12)
+        # self.init_weights()
 
-    def forward(self, sequence, segment_label):
-        x = self.token(sequence) + self.position(sequence) + self.segment(segment_label)
+    # def init_weights(self):
+    #     initrange = 0.1
+    #     self.token.weight.data.uniform_(-initrange, initrange)
+    #     self.position.weight.data.zero_()
+    #     self.segment.weight.data.uniform_(-initrange, initrange)
+
+    def forward(self, sequence, segment_label, train=True):
+        x = self.token(sequence) + self.position(sequence) + \
+            self.segment(segment_label)
+        # if train:
+        #     x = x * (1 - self.dropout.p)
+        # pdb.set_trace()
+        x = self.layernorm(x)
+        # if not train:
+        #     pdb.set_trace()
         return self.dropout(x)
