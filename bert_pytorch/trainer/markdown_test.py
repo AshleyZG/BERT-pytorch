@@ -1,9 +1,15 @@
+# coding=utf-8
+# created by Ge Zhang, Jan 20, 2020
+#
+# annotation test file
+
+
 import torch
 import torch.nn as nn
 from torch.optim import Adam, SGD
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
-from model import BERTLM, BERT, VAE
+from model import BERTLM, BERT, VAE, TempVAE
 from .optim_schedule import ScheduledOptim
 
 import tqdm
@@ -29,7 +35,7 @@ def my_loss(reconstructed_pos, origin_pos, origin_neg):
     return loss
 
 
-class ReconstructionBERTTrainer:
+class TempTrainer:
     """
     BERTTrainer make the pretrained BERT model with two LM training method.
 
@@ -40,7 +46,7 @@ class ReconstructionBERTTrainer:
 
     """
 
-    def __init__(self, bert: BERT, vocab_size: int, markdown_vocab_size, markdown_emb_size,
+    def __init__(self, bert: BERT, vocab_size: int,
                  train_dataloader: DataLoader, test_dataloader: DataLoader,
                  lr: float = 1e-4, betas=(0.9, 0.999), weight_decay: float = 0.01, warmup_steps=10000,
                  with_cuda: bool = True, cuda_devices=None, log_freq: int = 10, pad_index=0, loss_lambda=1, model_path=None, n_topics=50, weak_supervise=False, context=False, markdown=False, hinge_loss_start_point=20, entropy_start_point=30):
@@ -65,7 +71,6 @@ class ReconstructionBERTTrainer:
         self.markdown = markdown
         self.hinge_loss_start_point = hinge_loss_start_point
         self.entropy_start_point = entropy_start_point
-
         cuda_condition = torch.cuda.is_available() and with_cuda
 
         self.device = torch.device("cuda:0" if cuda_condition else "cpu")
@@ -73,18 +78,14 @@ class ReconstructionBERTTrainer:
         # This BERT model will be saved every epoch
         self.bert = bert
         # Initialize the BERT Language Model, with BERT model
-        self.model = VAE(bert, vocab_size, markdown_vocab_size, markdown_emb_size, n_topics=n_topics,
-                         weak_supervise=weak_supervise, context=context, markdown=markdown).to(self.device)
+        self.model = TempVAE(bert, vocab_size, n_topics=n_topics,
+                             weak_supervise=weak_supervise, context=context, markdown=markdown).to(self.device)
+        # pdb.set_trace()
+        print(model_path)
         if model_path:
             self.model.load_state_dict(
                 torch.load(model_path)["model_state_dict"])
-            last_epoch = int(model_path.split('.')[-1][2:])
-            self.last_epoch = last_epoch
 
-        else:
-            self.last_epoch = None
-            # raise NotImplementedError
-            # pdb.set_trace()
             # Distributed GPU training if CUDA can detect more than 1 GPU
         if with_cuda and torch.cuda.device_count() > 1:
             # pdb.set_trace()
@@ -102,10 +103,6 @@ class ReconstructionBERTTrainer:
         # self.optim_schedule = ScheduledOptim(
         #     self.optim, self.bert.hidden, n_warmup_steps=warmup_steps)
         self.optim = SGD(self.model.parameters(), lr=lr, momentum=0.9)
-        if self.last_epoch and self.last_epoch >= self.hinge_loss_start_point:
-            self.optim = SGD(self.model.parameters(),
-                             lr=0.00002, momentum=0.9)
-
         # Using Negative Log Likelihood Loss function for predicting the masked_token
         # self.criterion = nn.NLLLoss(ignore_index=self.pad_index)
         self.best_loss = None
@@ -165,15 +162,15 @@ class ReconstructionBERTTrainer:
                 # 1. forward the next_sentence_prediction and masked_lm model
                 # pdb.set_trace()
                 reconstructed_vec, graph_vec, origin_neg, topic_dist, stage_vec = self.model.forward(
-                    data["bert_input"], ndata["bert_input"], data["segment_label"], ndata["segment_label"], data["adj_mat"], ndata["adj_mat"], train=False, context_topic_dist=data["context_topic_vec"], markdown_label=data["markdown_label"], markdown_len=data["markdown_len"], neg_markdown_label=ndata["markdown_label"], neg_markdown_len=ndata["markdown_len"])
-                data_loader.dataset.update_topic_dist(topic_dist, data["id"])
+                    data["bert_input"], ndata["bert_input"], data["segment_label"], ndata["segment_label"], data["adj_mat"], ndata["adj_mat"], train=False)
+                # data_loader.dataset.update_topic_dist(topic_dist, data["id"])
 
-                phases += torch.max(topic_dist, 1)[-1].tolist()
+                # phases += torch.max(topic_dist, 1)[-1].tolist()
                 # print(torch.max(stage_vec, 1)[-1].tolist())
                 stages += torch.max(stage_vec, 1)[-1].tolist()
                 stage_vecs += stage_vec.tolist()
                 # pdb.set_trace()
-        return phases, stages, stage_vecs
+        return stages, stage_vecs
 
     def iteration(self, epoch, data_loader, train=True):
         """
@@ -200,38 +197,30 @@ class ReconstructionBERTTrainer:
         # def calculate_iter(data):
 
         for i, item in data_iter:
+            # if train:
+            #     self.optim.zero_grad()
             data = item[0]
             ndata = item[1]
 
             data = {key: value.to(self.device) for key, value in data.items()}
             ndata = {key: value.to(self.device)
                      for key, value in ndata.items()}
-
-            # 1. forward the next_sentence_prediction and masked_lm model
+            # pdb.set_trace()
 
             reconstructed_vec, graph_vec, origin_neg, topic_dist, stage_vec = self.model.forward(
-                data["bert_input"], ndata["bert_input"], data["segment_label"], ndata["segment_label"], data["adj_mat"], ndata["adj_mat"], train=train, context_topic_dist=data["context_topic_vec"], markdown_label=data["markdown_label"], markdown_len=data["markdown_len"], neg_markdown_label=ndata["markdown_label"], neg_markdown_len=ndata["markdown_len"])
-            # pdb.set_trace()
-            if self.context:
-                data_loader.dataset.update_topic_dist(topic_dist, data["id"])
-            bs, hid_size = reconstructed_vec.shape
-            nbs, hid_size = origin_neg.shape
+                data["bert_input"], ndata["bert_input"], data["segment_label"], ndata["segment_label"], data["adj_mat"], ndata["adj_mat"], train=train)
+
+            bs, _ = reconstructed_vec.shape
+            nbs, _ = origin_neg.shape
             duplicate = int(nbs / bs)
-            # pdb.set_trace()
-            # if str_code == 'test':
-            #     pdb.set_trace()
+
             hinge_loss = my_loss(reconstructed_vec, graph_vec, origin_neg)
             weight_loss = torch.norm(torch.mm(
                 self.model.reconstruction.weight.T, self.model.reconstruction.weight) - torch.eye(self.n_topics).cuda())
-            loss = self.loss_lambda * weight_loss + hinge_loss
-            # if self.weak_supervise:
-
             c_entropy = self.cross_entropy(stage_vec, data['stage'])
-
             entropy = -1 * (F.softmax(stage_vec, dim=1) *
                             F.log_softmax(stage_vec, dim=1)).sum()
-
-            loss += 2 * c_entropy  # + 0.001 * entropy
+            # raise NotImplementedError
             if epoch < self.hinge_loss_start_point:
                 loss = c_entropy
             # else:
@@ -239,10 +228,12 @@ class ReconstructionBERTTrainer:
                 loss = c_entropy + self.loss_lambda * weight_loss + hinge_loss
             else:
                 loss = c_entropy + entropy + self.loss_lambda * weight_loss + hinge_loss
-
+            # loss = self.loss_lambda * weight_loss + hinge_loss
             if epoch == self.hinge_loss_start_point:
                 self.optim = SGD(self.model.parameters(),
-                                 lr=0.00002, momentum=0.9)
+                                 lr=0.00001, momentum=0.9)
+
+            # pdb.set_trace()
 
             # 3. backward and optimization only in train
 
