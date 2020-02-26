@@ -10,7 +10,7 @@ class BERTGraph(nn.Module):
     Next Sentence Prediction Model + Masked Language Model
     """
 
-    def __init__(self, bert: BERT, vocab_size):
+    def __init__(self, bert: BERT, vocab_size, markdown=False):
         """
         :param bert: BERT model which should be trained
         :param vocab_size: total vocab size for masked_lm
@@ -18,6 +18,10 @@ class BERTGraph(nn.Module):
 
         super().__init__()
         self.bert = bert
+        self.markdown = markdown
+        # if self.markdown:
+
+        # raise NotImplementedError
 
         self.next_sentence = NextSentencePrediction(self.bert.hidden)
         self.mask_lm = MaskedLanguageModel(self.bert.hidden, vocab_size)
