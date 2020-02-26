@@ -1,0 +1,22 @@
+python3 bert_pytorch/snap_main.py \
+	--dataset="/homes/gws/gezhang/jupyter-notebook-analysis/graphs/cell_with_func_python23_1_27.txt" \
+	--output_path='all_snap_7.model' \
+	--test_path='/homes/gws/gezhang/jupyter-notebook-analysis/graphs/test_cells_1_27.txt' \
+	--cuda_devices='0' \
+	--log_freq=10000 \
+	--epochs=50 \
+	--layers=4 \
+	--attn_heads=4 \
+	--lr=0.00005 \
+	--batch_size=16 \
+	--num_workers=1 \
+	--duplicate=5 \
+	--dropout=0 \
+	--min_occur=5 \
+	--weak_supervise \
+	--use_sub_token \
+	--seq_len=160 \
+	--max_graph_num=1000000 \
+	--hinge_loss_start_point=1 \
+	--entropy_start_point=6
+
